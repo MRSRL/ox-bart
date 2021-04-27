@@ -381,8 +381,13 @@ static int ImageNumber(const int slice, const int echo, const int phase, const L
 	// Image numbering scheme:
 	// P0S0E0, P0S0E1, ... P0S0En, P0S1E0, P0S1E1, ... P0S1En, ... P0SnEn, ...
 	// P1S0E0, P1S0E1, ... PnSnEn
-	const int slicesPerPhase = pfile->SliceCount() * pfile->EchoCount();
-	const int imageNumber = phase * slicesPerPhase + slice * pfile->EchoCount() + echo;
+	// const int slicesPerPhase = pfile->SliceCount() * pfile->EchoCount();
+	// const int imageNumber = phase * slicesPerPhase + slice * pfile->EchoCount() + echo;
+
+        // CMS: Custom image numbering scheme for mfast DCE:
+        // E0S0P0, E0S0P1, ...
+	const int slicesPerEcho = pfile->SliceCount() * pfile->PassCount();
+	const int imageNumber = echo * slicesPerEcho + slice * pfile->PassCount() + phase;
 
 	return imageNumber;
 }
@@ -514,10 +519,12 @@ void BartIO::BartToDicom(const long dims[DIMS], const std::string& fileNamePrefi
 		debug_printf(DP_WARN, "Backwards ZIP not yet implemented for BartToDicom!\n");
 
 	// check consistency of dimensions
-	assert(processingControl->Value<int>("AcquiredXRes") == dims[0]);
-	assert(processingControl->Value<int>("AcquiredYRes") == dims[1]);
-	assert(processingControl->Value<int>("AcquiredZRes") == numAcqSlices);
-	assert(numZipSlices >= numAcqSlices);
+    // CMS: These checks cause issues for MFAST because these fields are
+    // used to define other things.. (i.e. xres=nav+readout)
+	// assert(processingControl->Value<int>("AcquiredXRes") == dims[0]);
+    // assert(processingControl->Value<int>("AcquiredYRes") == dims[1]);
+	// assert(processingControl->Value<int>("AcquiredZRes") == numAcqSlices);
+	// assert(numZipSlices >= numAcqSlices);
 
 
 	// apply zip in Z direction
