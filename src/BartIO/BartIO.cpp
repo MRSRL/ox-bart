@@ -24,6 +24,8 @@
 
 #include <Orchestra/Legacy/DicomSeries.h>
 #include <Orchestra/Legacy/Pfile.h>
+#include <Orchestra/Legacy/LegacyImageDB.h>
+#include <Orchestra/Legacy/LegacyRdbm.h>
 
 #include <Orchestra/Acquisition/ControlPacket.h>
 #include <Orchestra/Acquisition/ControlTypes.h>
@@ -381,13 +383,13 @@ static int ImageNumber(const int slice, const int echo, const int phase, const L
 	// Image numbering scheme:
 	// P0S0E0, P0S0E1, ... P0S0En, P0S1E0, P0S1E1, ... P0S1En, ... P0SnEn, ...
 	// P1S0E0, P1S0E1, ... PnSnEn
-	// const int slicesPerPhase = pfile->SliceCount() * pfile->EchoCount();
-	// const int imageNumber = phase * slicesPerPhase + slice * pfile->EchoCount() + echo;
+	const int slicesPerPhase = pfile->SliceCount() * pfile->EchoCount();
+	const int imageNumber = phase * slicesPerPhase + slice * pfile->EchoCount() + echo;
 
-        // CMS: Custom image numbering scheme for mfast DCE:
-        // E0S0P0, E0S0P1, ...
-	const int slicesPerEcho = pfile->SliceCount() * pfile->PassCount();
-	const int imageNumber = echo * slicesPerEcho + slice * pfile->PassCount() + phase;
+    // CMS: Custom image numbering scheme for mfast DCE:
+    // E0S0P0, E0S0P1, ...
+	// const int slicesPerEcho = pfile->SliceCount() * pfile->PassCount();
+	// const int imageNumber = echo * slicesPerEcho + slice * pfile->PassCount() + phase;
 
 	return imageNumber;
 }
@@ -526,7 +528,6 @@ void BartIO::BartToDicom(const long dims[DIMS], const std::string& fileNamePrefi
 	// assert(processingControl->Value<int>("AcquiredZRes") == numAcqSlices);
 	// assert(numZipSlices >= numAcqSlices);
 
-
 	// apply zip in Z direction
 	long dims_zip[DIMS];
 	md_select_dims(DIMS, ~PHS2_FLAG, dims_zip, dims);
@@ -619,6 +620,10 @@ void BartIO::BartToDicom(const long dims[DIMS], const std::string& fileNamePrefi
  */
 void BartIO::OxImageToDicom(MDArray::FloatMatrix& magnitudeImage, const int currentSlice, const int currentEcho, const int currentPhase, const std::string& fileNamePrefix, const boost::optional<int>& seriesNumber, const boost::optional<std::string>& seriesDescription, const Legacy::DicomSeries& dicomSeries, const GEDicom::NetworkPointer& dicomNetwork, const Legacy::PfilePointer& pfile, GradwarpPlugin& gradwarp)
 {
+    // Get P-file header to compute timing information in multi-phase (i.e. mfast DCE)
+    const GERecon::Legacy::LxDownloadData& downloadData = *pfile->DownloadData();
+    const GERecon::Legacy::MrImageDataTypeStruct& imageHeader = downloadData.ImageHeaderData();
+
 	// Get information for current slice
 	const SliceOrientation& sliceOrientation = pfile->Orientation(currentSlice);
 	const SliceCorners& sliceCorners = pfile->Corners(currentSlice);
@@ -642,6 +647,27 @@ void BartIO::OxImageToDicom(MDArray::FloatMatrix& magnitudeImage, const int curr
 	dicom->Insert<GEDicom::LongString>(0x0008, 0x103E, seriesDescription); // Series description, showed in image browser
 	dicom->Insert<GEDicom::LongString>(0x0008, 0x1090, seriesDescription); // Manufacturers model name, showed in annotation
 	dicom->Insert<GEDicom::IntegerString>(0x0020, 0x0011, seriesNumber);
+
+    // Add delay time for multi-phase (note that this uses the TriggerTime DICOM field)
+    // Note: this based on offline.recon code by Marc Alley (ReconSupport::mpDlyTime())
+    std::stringstream dicomTriggerTime;
+    const int numPasses = pfile->PassCount(); // Should equal number of acquired phases
+    float passTime = imageHeader.delAcq / 1.0e3; // For MFAST, this is the pass time (ms)
+    float totalScanTime = imageHeader.sctime / 1.0e3; // Total scan time (ms)
+    float totalScanTimeNoDly = totalScanTime - numPasses*passTime; // Scan time without opsldelay (ms)
+    float timePerVolume = totalScanTimeNoDly / (float) numPasses; // Time per volume (ms)
+    float delayTime = currentPhase*(timePerVolume + passTime);
+    dicomTriggerTime << floor(delayTime);
+    dicom->Insert<GEDicom::IntegerString>(0x0018, 0x1060, dicomTriggerTime.str());
+
+    // Add temporal position tags for multi-phase (i.e. DCE)
+	std::stringstream dicomTemporalPosition;
+    dicomTemporalPosition << 1 + currentPhase;
+    dicom->Insert<GEDicom::IntegerString>(0x0020, 0x0100, dicomTemporalPosition.str());
+
+    std::stringstream dicomNumberOfTemporal;
+    dicomNumberOfTemporal << numPasses;
+    dicom->Insert<GEDicom::IntegerString>(0x0020, 0x0105, dicomNumberOfTemporal.str());
 
 	// Save DICOM to file and also store it if network is active
 	std::ostringstream strm;
