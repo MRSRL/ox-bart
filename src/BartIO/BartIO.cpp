@@ -645,7 +645,6 @@ void BartIO::OxImageToDicom(MDArray::FloatMatrix& magnitudeImage, const int curr
 	// Add custom annotation if specified on command line.
 	// Note, boost::optional<> types only get inserted if set.
 	dicom->Insert<GEDicom::LongString>(0x0008, 0x103E, seriesDescription); // Series description, showed in image browser
-	dicom->Insert<GEDicom::LongString>(0x0008, 0x1090, seriesDescription); // Manufacturers model name, showed in annotation
 	dicom->Insert<GEDicom::IntegerString>(0x0020, 0x0011, seriesNumber);
 
     // Add delay time for multi-phase (note that this uses the TriggerTime DICOM field)
